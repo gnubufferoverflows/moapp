@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import HanziWriter from 'hanzi-writer'
+import HanziWriter, { type CharDataLoaderFn, type CharacterJson } from 'hanzi-writer'
 import { ArrowRight, Check, Gauge, Lightbulb, LoaderCircle, Play, RotateCcw, ShieldCheck, Volume2 } from 'lucide-react'
 import type { CharacterItem } from '@/data/characters'
 import { useLanguage } from '@/i18n'
 import { gradeLocally } from '@/services/localGrader'
+import { captureFirstStroke, gradeFirstStroke, type FirstStrokeCapture } from '@/services/firstStroke'
 import { localCharDataLoader } from '@/services/strokeData'
 import type { GradeResult, PracticeMode } from '@/types'
 
@@ -40,26 +41,63 @@ export default function WritingStudio({ item, mode, onModeChange, onNext, onGrad
   const [writerError, setWriterError] = useState(false)
   const [isDemo, setIsDemo] = useState(false)
   const [grade, setGrade] = useState<GradeResult | null>(null)
+  const charDataRef = useRef<CharacterJson | null>(null)
+  const firstStrokeRef = useRef<FirstStrokeCapture | null>(null)
+  const firstStrokeMissesRef = useRef(0)
+  const mistakesOffsetRef = useRef(0)
 
-  const startQuiz = useCallback(() => {
+  const startQuiz = useCallback<(startStroke?: number) => void>((startStroke = 0) => {
     const writer = writerRef.current
     if (!writer) return
     writer.quiz({
       leniency: mode === 'guided' ? 1 : 0.82,
+      quizStartStrokeNum: startStroke,
       showHintAfterMisses: 3,
       highlightOnComplete: true,
-      onMistake: data => setMistakes(data.totalMistakes),
+      onMistake: data => setMistakes(mistakesOffsetRef.current + data.totalMistakes),
       onCorrectStroke: data => {
         setCorrectStrokes(data.strokeNum + 1)
-        setMistakes(data.totalMistakes)
+        setMistakes(mistakesOffsetRef.current + data.totalMistakes)
       },
       onComplete: summary => {
         setCorrectStrokes(item.strokes)
-        setMistakes(summary.totalMistakes)
+        setMistakes(mistakesOffsetRef.current + summary.totalMistakes)
         setLocalComplete(true)
       },
     })
   }, [item.strokes, mode])
+
+  // The opening stroke is graded with a custom matcher that is generous about
+  // where the stroke lands in the box but keeps normal shape strictness.
+  // Once accepted, hanzi-writer's quiz resumes from stroke 2 unchanged.
+  const beginFirstStroke = useCallback(() => {
+    const target = targetRef.current
+    const charData = charDataRef.current
+    if (!target || !charData) return
+    firstStrokeRef.current?.destroy()
+    firstStrokeRef.current = captureFirstStroke(target, {
+      onStrokeDrawn: points => {
+        const grade = gradeFirstStroke(points, charData, mode === 'guided' ? 1 : 0.82)
+        if (grade.pass) {
+          firstStrokeRef.current?.destroy()
+          firstStrokeRef.current = null
+          setCorrectStrokes(1)
+          startQuiz(1)
+        } else {
+          firstStrokeRef.current?.rejectInk()
+          firstStrokeMissesRef.current += 1
+          mistakesOffsetRef.current += 1
+          setMistakes(mistakesOffsetRef.current)
+          if (firstStrokeMissesRef.current % 3 === 0) writerRef.current?.highlightStroke(0)
+        }
+      },
+    })
+  }, [mode, startQuiz])
+
+  const beginStrokePhase = useCallback(() => {
+    if (item.strokes > 1) beginFirstStroke()
+    else startQuiz(0)
+  }, [item.strokes, beginFirstStroke, startQuiz])
 
   useEffect(() => {
     const target = targetRef.current
@@ -83,11 +121,17 @@ export default function WritingStudio({ item, mode, onModeChange, onNext, onGrad
       outlineWidth: 2,
       delayBetweenStrokes: 220,
       strokeAnimationSpeed: 1.25,
-      charDataLoader: localCharDataLoader,
+      charDataLoader: ((char, onLoad, onError) =>
+        localCharDataLoader(char, data => {
+          charDataRef.current = data
+          onLoad(data)
+        }, onError)) as CharDataLoaderFn,
       onLoadCharDataSuccess: () => {
         if (loadId !== loadIdRef.current) return
         setLoading(false)
-        startQuiz()
+        mistakesOffsetRef.current = 0
+        firstStrokeMissesRef.current = 0
+        beginStrokePhase()
       },
       onLoadCharDataError: () => {
         if (loadId !== loadIdRef.current) return
@@ -100,15 +144,19 @@ export default function WritingStudio({ item, mode, onModeChange, onNext, onGrad
     svg?.setAttribute('viewBox', '0 0 600 600')
     svg?.setAttribute('preserveAspectRatio', 'xMidYMid meet')
     return () => {
+      firstStrokeRef.current?.destroy()
+      firstStrokeRef.current = null
       writer.cancelQuiz()
       writer.pauseAnimation()
       writerRef.current = null
     }
-  }, [item.char, item.strokes, mode, startQuiz])
+  }, [item.char, item.strokes, mode, beginStrokePhase])
 
   const reset = () => {
     const writer = writerRef.current
     if (!writer) return
+    firstStrokeRef.current?.destroy()
+    firstStrokeRef.current = null
     writer.cancelQuiz()
     writer.pauseAnimation()
     writer.hideCharacter({ duration: 0 })
@@ -116,12 +164,14 @@ export default function WritingStudio({ item, mode, onModeChange, onNext, onGrad
     else writer.hideOutline({ duration: 0 })
     setCorrectStrokes(0)
     setMistakes(0)
+    mistakesOffsetRef.current = 0
+    firstStrokeMissesRef.current = 0
     setHasInk(false)
     setLocalComplete(false)
     setGrade(null)
     setWriterError(false)
     setIsDemo(false)
-    startQuiz()
+    beginStrokePhase()
   }
 
   const showDemo = async () => {
@@ -129,19 +179,23 @@ export default function WritingStudio({ item, mode, onModeChange, onNext, onGrad
     if (!writer || isDemo) return
     setIsDemo(true)
     setGrade(null)
+    firstStrokeRef.current?.destroy()
+    firstStrokeRef.current = null
     writer.cancelQuiz()
     await writer.showCharacter({ duration: 100 })
     await writer.animateCharacter()
     await writer.hideCharacter({ duration: 120 })
     setIsDemo(false)
-    startQuiz()
+    if (correctStrokes === 0) beginStrokePhase()
+    else startQuiz(correctStrokes)
   }
 
   const requestHint = async () => {
     const writer = writerRef.current
     if (!writer || localComplete || isDemo) return
     await writer.highlightStroke(Math.min(correctStrokes, item.strokes - 1))
-    startQuiz()
+    if (correctStrokes === 0 && item.strokes > 1) beginFirstStroke()
+    else startQuiz(correctStrokes)
   }
 
   const reviewAttempt = () => {

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import HanziWriter from 'hanzi-writer'
+import HanziWriter, { type CharDataLoaderFn, type CharacterJson } from 'hanzi-writer'
 import { Check, Gauge, Lightbulb, LoaderCircle, RotateCcw } from 'lucide-react'
 import type { CharacterItem } from '@/data/characters'
 import { useLanguage } from '@/i18n'
 import { gradeLocally } from '@/services/localGrader'
+import { captureFirstStroke, gradeFirstStroke, type FirstStrokeCapture } from '@/services/firstStroke'
 import { localCharDataLoader } from '@/services/strokeData'
 import type { GradeResult, PracticeMode } from '@/types'
 
@@ -25,23 +26,60 @@ export default function SentenceCharacterBox({ item, position, mode, bestScore, 
   const [mistakes, setMistakes] = useState(0)
   const [hasInk, setHasInk] = useState(false)
   const [grade, setGrade] = useState<GradeResult | null>(null)
+  const charDataRef = useRef<CharacterJson | null>(null)
+  const firstStrokeRef = useRef<FirstStrokeCapture | null>(null)
+  const firstStrokeMissesRef = useRef(0)
+  const mistakesOffsetRef = useRef(0)
 
-  const startQuiz = useCallback(() => {
+  const startQuiz = useCallback<(startStroke?: number) => void>((startStroke = 0) => {
     writerRef.current?.quiz({
       leniency: mode === 'guided' ? 1 : 0.82,
+      quizStartStrokeNum: startStroke,
       showHintAfterMisses: 3,
       highlightOnComplete: true,
-      onMistake: data => setMistakes(data.totalMistakes),
+      onMistake: data => setMistakes(mistakesOffsetRef.current + data.totalMistakes),
       onCorrectStroke: data => {
         setCorrectStrokes(data.strokeNum + 1)
-        setMistakes(data.totalMistakes)
+        setMistakes(mistakesOffsetRef.current + data.totalMistakes)
       },
       onComplete: summary => {
         setCorrectStrokes(item.strokes)
-        setMistakes(summary.totalMistakes)
+        setMistakes(mistakesOffsetRef.current + summary.totalMistakes)
       },
     })
   }, [item.strokes, mode])
+
+  // The opening stroke is graded with a custom matcher that is generous about
+  // where the stroke lands in the box but keeps normal shape strictness.
+  // Once accepted, hanzi-writer's quiz resumes from stroke 2 unchanged.
+  const beginFirstStroke = useCallback(() => {
+    const target = targetRef.current
+    const charData = charDataRef.current
+    if (!target || !charData) return
+    firstStrokeRef.current?.destroy()
+    firstStrokeRef.current = captureFirstStroke(target, {
+      onStrokeDrawn: points => {
+        const grade = gradeFirstStroke(points, charData, mode === 'guided' ? 1 : 0.82)
+        if (grade.pass) {
+          firstStrokeRef.current?.destroy()
+          firstStrokeRef.current = null
+          setCorrectStrokes(1)
+          startQuiz(1)
+        } else {
+          firstStrokeRef.current?.rejectInk()
+          firstStrokeMissesRef.current += 1
+          mistakesOffsetRef.current += 1
+          setMistakes(mistakesOffsetRef.current)
+          if (firstStrokeMissesRef.current % 3 === 0) writerRef.current?.highlightStroke(0)
+        }
+      },
+    })
+  }, [mode, startQuiz])
+
+  const beginStrokePhase = useCallback(() => {
+    if (item.strokes > 1) beginFirstStroke()
+    else startQuiz(0)
+  }, [item.strokes, beginFirstStroke, startQuiz])
 
   useEffect(() => {
     const target = targetRef.current
@@ -63,11 +101,17 @@ export default function SentenceCharacterBox({ item, position, mode, bestScore, 
       strokeWidth: 4,
       outlineWidth: 2,
       delayBetweenStrokes: 160,
-      charDataLoader: localCharDataLoader,
+      charDataLoader: ((char, onLoad, onError) =>
+        localCharDataLoader(char, data => {
+          charDataRef.current = data
+          onLoad(data)
+        }, onError)) as CharDataLoaderFn,
       onLoadCharDataSuccess: () => {
         if (!active) return
         setLoading(false)
-        startQuiz()
+        mistakesOffsetRef.current = 0
+        firstStrokeMissesRef.current = 0
+        beginStrokePhase()
       },
       onLoadCharDataError: () => {
         if (!active) return
@@ -81,15 +125,19 @@ export default function SentenceCharacterBox({ item, position, mode, bestScore, 
     svg?.setAttribute('preserveAspectRatio', 'xMidYMid meet')
     return () => {
       active = false
+      firstStrokeRef.current?.destroy()
+      firstStrokeRef.current = null
       writer.cancelQuiz()
       writer.pauseAnimation()
       writerRef.current = null
     }
-  }, [item.char, mode, startQuiz])
+  }, [item.char, mode, beginStrokePhase])
 
   const reset = () => {
     const writer = writerRef.current
     if (!writer) return
+    firstStrokeRef.current?.destroy()
+    firstStrokeRef.current = null
     writer.cancelQuiz()
     writer.pauseAnimation()
     writer.hideCharacter({ duration: 0 })
@@ -97,17 +145,20 @@ export default function SentenceCharacterBox({ item, position, mode, bestScore, 
     else writer.hideOutline({ duration: 0 })
     setCorrectStrokes(0)
     setMistakes(0)
+    mistakesOffsetRef.current = 0
+    firstStrokeMissesRef.current = 0
     setHasInk(false)
     setGrade(null)
     setError(false)
-    startQuiz()
+    beginStrokePhase()
   }
 
   const hint = async () => {
     const writer = writerRef.current
     if (!writer || correctStrokes >= item.strokes) return
     await writer.highlightStroke(correctStrokes)
-    startQuiz()
+    if (correctStrokes === 0 && item.strokes > 1) beginFirstStroke()
+    else startQuiz(correctStrokes)
   }
 
   const score = () => {
