@@ -31,7 +31,7 @@ export function gradeLocally({ char, expectedStrokes, correctStrokes, mistakes, 
   if (corrections > 0) feedback.push(t('grade.reviewCorrections', { count: corrections }))
   if (complete && corrections === 0) feedback.push(t('grade.keepRhythm'))
   if (mode === 'guided' && complete) feedback.push(t('grade.switchRecall'))
-  if (mode === 'recall' && !complete) feedback.push(t('grade.returnGuided'))
+  if ((mode === 'recall' || mode === 'hard') && !complete) feedback.push(t('grade.returnGuided'))
 
   return {
     attemptId: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,

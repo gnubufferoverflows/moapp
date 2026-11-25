@@ -16,7 +16,10 @@ export default function App() {
   const [view, setView] = useState<AppView>('practice')
   const [currentIndex, setCurrentIndex] = useState(0)
   const [extendedCharacter, setExtendedCharacter] = useState<CharacterItem | null>(null)
-  const [mode, setMode] = useState<PracticeMode>(() => localStorage.getItem('mo-practice-mode') === 'recall' ? 'recall' : 'guided')
+  const [mode, setMode] = useState<PracticeMode>(() => {
+    const saved = localStorage.getItem('mo-practice-mode')
+    return saved === 'recall' || saved === 'hard' ? saved : 'guided'
+  })
   const [sessionCount, setSessionCount] = useState(0)
   const { language, setLanguage, t } = useLanguage()
   const { progress, recordGrade, resetProgress, replaceProgress } = useProgress()

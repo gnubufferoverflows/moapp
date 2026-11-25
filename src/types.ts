@@ -1,4 +1,4 @@
-export type PracticeMode = 'guided' | 'recall'
+export type PracticeMode = 'guided' | 'recall' | 'hard'
 export type AppView = 'practice' | 'sentences' | 'characters' | 'progress'
 
 export interface GradeResult {

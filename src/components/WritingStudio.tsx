@@ -30,6 +30,10 @@ function speak(text: string) {
 
 export default function WritingStudio({ item, mode, onModeChange, onNext, onGraded, masteredScore, sessionCount, dailyCount }: WritingStudioProps) {
   const { language, t } = useLanguage()
+  const hardMode = mode === 'hard'
+  // In hard mode the example sentence shows pinyin in place of the target
+  // character, so it can't give the glyph away.
+  const exampleText = hardMode ? item.example.split(item.char).join(item.pinyin || '?') : item.example
   const targetRef = useRef<HTMLDivElement>(null)
   const writerRef = useRef<HanziWriter | null>(null)
   const loadIdRef = useRef(0)
@@ -222,11 +226,11 @@ export default function WritingStudio({ item, mode, onModeChange, onNext, onGrad
           </button>
         </div>
 
-        <div className="character-index" aria-hidden="true">{item.char}</div>
+        {mode !== 'hard' && <div className="character-index" aria-hidden="true">{item.char}</div>}
 
         <div className="example-block">
           <span className="section-label">{t('practice.example')}</span>
-          <div className="example-word"><span lang="zh-CN">{item.example}</span></div>
+          <div className="example-word"><span lang="zh-CN">{exampleText}</span></div>
           <span className="example-pinyin">{item.examplePinyin}</span>
           <p>{item.exampleMeaning}</p>
         </div>
@@ -242,8 +246,9 @@ export default function WritingStudio({ item, mode, onModeChange, onNext, onGrad
           <div className="mode-switch" aria-label={t('practice.mode')}>
             <button type="button" className={mode === 'guided' ? 'active' : ''} onClick={() => onModeChange('guided')} aria-pressed={mode === 'guided'}>{t('common.guided')}</button>
             <button type="button" className={mode === 'recall' ? 'active' : ''} onClick={() => onModeChange('recall')} aria-pressed={mode === 'recall'}>{t('common.recall')}</button>
+            <button type="button" className={mode === 'hard' ? 'active' : ''} onClick={() => onModeChange('hard')} aria-pressed={mode === 'hard'}>{t('common.hard')}</button>
           </div>
-          <span className="paper-instruction">{mode === 'guided' ? t('practice.trace') : t('practice.memory')}</span>
+          <span className="paper-instruction">{mode === 'guided' ? t('practice.trace') : mode === 'recall' ? t('practice.memory') : t('practice.hardMode')}</span>
         </div>
 
         <div className={`writing-paper ${localComplete ? 'complete' : ''}`}>
@@ -259,7 +264,7 @@ export default function WritingStudio({ item, mode, onModeChange, onNext, onGrad
           {loading && <div className="paper-state"><LoaderCircle className="spin" size={24} /><span>{t('practice.preparing')}</span></div>}
           {writerError && <div className="paper-state error"><span>{t('practice.loadError')}</span><button type="button" onClick={reset}>{t('common.tryAgain')}</button></div>}
           {isDemo && <div className="demo-label"><Play size={14} /> {t('practice.watch')}</div>}
-          <div className="paper-caption"><span>{item.char}</span><span>{t('practice.paperStrokes', { accepted: correctStrokes, total: item.strokes })}</span></div>
+          <div className="paper-caption"><span>{mode === 'hard' ? '？' : item.char}</span><span>{t('practice.paperStrokes', { accepted: correctStrokes, total: item.strokes })}</span></div>
         </div>
 
         <div className="writing-tools">
