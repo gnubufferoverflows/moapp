@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+dist
+data
+tests/artifacts
+*.log
+*.sqlite
+*.sqlite-*
+*.zip
+deploy-s3.ps1
+DEPLOY_S3.md

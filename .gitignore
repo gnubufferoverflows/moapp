@@ -1,0 +1,36 @@
+# Dependencies and production output
+node_modules/
+dist/
+dist-ssr/
+
+# Local data and secrets
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite-*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Test output
+tests/artifacts/
+
+# Editor and operating-system files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
